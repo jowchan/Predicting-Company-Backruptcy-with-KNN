@@ -1,0 +1,549 @@
+---
+title: "MLFinalProject"
+author: "Karen Zhu"
+date: "2/28/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Read Data and Explore Data
+```{r}
+#library for plots
+library(ggplot2)
+
+#KNN with different k 
+library(caret)
+library(e1071)
+library(class)
+library(leaps)
+library(readr)
+library(ggplot2)
+library(car)
+library(glmnet)
+library(GGally)
+
+df <- read.csv("C:\\Users\\karen\\Desktop\\Winter 2021\\Math 156\\Final Project\\data.csv\\bankruptcydata.csv")
+
+
+head(df)
+dim(df) # there are 96 predictors, including the target variable "Bankrupt."
+
+sum(is.na(df)) # no NA values
+
+
+#Convert 1 to "Yes" and 0 to "No"
+df$Bankrupt.[df$Bankrupt.==1]<-"Yes"
+df$Bankrupt.[df$Bankrupt.==0]<-"No"
+
+#Check predictor types --> we should have two categorical variables: "one if total liabilities exceeds total assets zero otherwise" and "one if net income was negative for the last two year zero otherwise"
+sapply(df, class)
+
+which( colnames(df)=="one.if.net.income.was.negative.for.the.last.two.year.zero.otherwise" )
+which( colnames(df)=="one.if.total.liabilities.exceeds.total.assets.zero.otherwise" )
+
+# df$one.if.net.income.was.negative.for.the.last.two.year.zero.otherwise <- as.factor(df$one.if.net.income.was.negative.for.the.last.two.year.zero.otherwise)
+# 
+# df$one.if.total.liabilities.exceeds.total.assets.zero.otherwise <- as.factor(df$one.if.total.liabilities.exceeds.total.assets.zero.otherwise)
+# 
+# sapply(df, class)
+
+df <- df[,-c(96,86)]
+
+```
+
+## Graphs to Understand our Data Better 
+```{r}
+barplot(table(df$Bankrupt.),col=rainbow(2),
+       main="Frequency of Bankrutcy",
+       xlab="Bankruptcy Tag",
+       ylab="Number of Companies")
+box()
+
+
+df$Bankrupt.<-as.factor(df$Bankrupt.)
+summary(df$Bankrupt.) 
+```
+
+## Choosing Best Subset of Predictors
+
+We use Backwards Subset BIC to choose the best subsets of predictors
+
+```{r}
+#fit backward stepwise regression with 
+regfit.bwd = regsubsets(Bankrupt.~., data = df, nvmax = 10, method = "backward")
+reg.summary = summary(regfit.bwd)
+
+#We determine "best" based on smallest BIC
+which.min(reg.summary$bic) #tells us we need 11 predictors based on BIC
+plot(reg.summary$bic,xlab="Number of Variables",ylab="BIC",type='b') 
+points(11,reg.summary$bic[11],col="red",cex=2,pch=20)
+
+coef(regfit.bwd,11)
+
+```
+
+
+
+## Modeling the Data using KNN
+```{r}
+head(df)
+set.seed(1)
+
+N = nrow(df)
+
+#30% testing data, 70% training
+test_num <- sample(1:N, 0.3*N, replace = F)
+
+df.test = df[test_num, ]
+df.train = df[-test_num, ]
+
+y.test = df$Bankrupt.[test_num]
+y.train = df$Bankrupt.[-test_num]
+
+#Here we choose the best subset of predictors based on our analysis above
+#Find the respective column numbers
+# which( colnames(df)=="ROA.A..before.interest.and...after.tax" )
+# which( colnames(df)=="ROA.B..before.interest.and.depreciation.after.tax" )
+# which( colnames(df)=="debt.ratio.." )
+# which( colnames(df)=="contingent.liabilities.net.worth" )
+# which( colnames(df)=="net.profit.before.tax.paid.in.capital" )
+# which( colnames(df)=="inventory.and.accounts.receivable.net.value" )
+# which( colnames(df)=="total.asset.turnover" )
+# which( colnames(df)=="Inventory.working.capital" )
+# which( colnames(df)=="total.income...total.expense" )
+# which( colnames(df)=="equity.to.long.term.liability" )
+# which( colnames(df)=="Gross.profit.to.Sales" )
+
+
+#Splitting and standardize the data
+x.mat <- df[,c(3,4,38,42,44,45,46,63,70,80,89)] #don't use factor variables, using only our best subset of predictors
+x.standard <- scale(x.mat) #standardize num variables
+test.1 <- sample(1:N, 0.3*N, replace = F)
+x.test <- x.standard[test.1, ]
+x.train <- x.standard[-test.1, ]
+
+
+#head(x.train)
+
+#We check k = 1 and k = 3 since the test starts at k = 5
+output.k1 <- knn(x.train, x.test, y.train, k=1)
+table(output.k1, y.test)
+mean(output.k1 != y.test) #Misclassification rate
+mean(output.k1 == y.test) #Accuracy
+
+#for k = 3
+output.k3 <- knn(x.train, x.test, y.train, k=3)
+table(output.k3, y.test)
+mean(output.k3 != y.test) #Misclassification rate
+mean(output.k3 == y.test) #Accuracy
+
+
+#KNN test
+trctrl <- trainControl(method = "repeatedcv", number = 20, repeats = 3)
+set.seed(1)
+knn_fit <- train(Bankrupt. ~ ., data = df.train[c(1,3,4,38,42,44,45,46,63,70,80,89)], method = "knn", trControl = trctrl, preProcess = c("center", "scale"), tuneLength = 20)
+
+knn_fit
+
+tt <- data.frame(knn_fit[4])
+str(tt)
+
+plot(tt[,1], tt[,2], type = "b", col = "blue", xlab = "k Nearest Neighbor", ylab = "Accuracy", main = "K vs Accuracy")
+abline(v = 29, col = "red")
+
+#use k = 29 based on highest accuracy from graph
+output.k29 <- knn(x.train, x.test, y.train, k = 29)
+table(output.k29, y.test)
+mean(output.k29 != y.test) #Misclassification rate
+mean(output.k29 == y.test) #Accuracy
+
+```
+## Create Confusion Matrix
+
+```{r}
+
+library(caret)
+
+cm29 <- confusionMatrix(output.k29, y.test)
+cm29
+
+draw_confusion_matrix1 <- function(cm) {
+
+  total <- sum(cm$table)
+  res <- as.numeric(cm$table)
+
+  # Generate color gradients. Palettes come from RColorBrewer.
+  greenPalette <- c("#F7FCF5","#E5F5E0","#C7E9C0","#A1D99B","#74C476","#41AB5D","#238B45","#006D2C","#00441B")
+  redPalette <- c("#FFF5F0","#FEE0D2","#FCBBA1","#FC9272","#FB6A4A","#EF3B2C","#CB181D","#A50F15","#67000D")
+  getColor <- function (greenOrRed = "green", amount = 0) {
+    if (amount == 0)
+      return("#FFFFFF")
+    palette <- greenPalette
+    if (greenOrRed == "red")
+      palette <- redPalette
+    colorRampPalette(palette)(100)[10 + ceiling(90 * amount / total)]
+  }
+
+  # set the basic layout
+  layout(matrix(c(1,1,2)))
+  par(mar=c(2,2,2,2))
+  plot(c(100, 345), c(300, 450), type = "n", xlab="", ylab="", xaxt='n', yaxt='n')
+  title('CONFUSION MATRIX for k = 1', cex.main=2)
+
+  # create the matrix 
+  classes = colnames(cm$table)
+  rect(150, 430, 240, 370, col=getColor("green", res[1]))
+  text(195, 435, classes[1], cex=1.2)
+  rect(250, 430, 340, 370, col=getColor("red", res[3]))
+  text(295, 435, classes[2], cex=1.2)
+  text(125, 370, 'Predicted', cex=1.3, srt=90, font=2)
+  text(245, 450, 'Actual', cex=1.3, font=2)
+  rect(150, 305, 240, 365, col=getColor("red", res[2]))
+  rect(250, 305, 340, 365, col=getColor("green", res[4]))
+  text(140, 400, classes[1], cex=1.2, srt=90)
+  text(140, 335, classes[2], cex=1.2, srt=90)
+
+  # add in the cm results
+  text(195, 400, res[1], cex=1.6, font=2, col='white')
+  text(195, 335, res[2], cex=1.6, font=2, col='white')
+  text(295, 400, res[3], cex=1.6, font=2, col='white')
+  text(295, 335, res[4], cex=1.6, font=2, col='white')
+
+  # add in the specifics 
+  plot(c(100, 0), c(100, 0), type = "n", xlab="", ylab="", main = "DETAILS", xaxt='n', yaxt='n')
+  text(10, 85, names(cm$byClass[1]), cex=1.2, font=2)
+  text(10, 70, round(as.numeric(cm$byClass[1]), 3), cex=1.2)
+  text(30, 85, names(cm$byClass[2]), cex=1.2, font=2)
+  text(30, 70, round(as.numeric(cm$byClass[2]), 3), cex=1.2)
+  text(50, 85, names(cm$byClass[5]), cex=1.2, font=2)
+  text(50, 70, round(as.numeric(cm$byClass[5]), 3), cex=1.2)
+  text(70, 85, names(cm$byClass[6]), cex=1.2, font=2)
+  text(70, 70, round(as.numeric(cm$byClass[6]), 3), cex=1.2)
+  text(90, 85, names(cm$byClass[7]), cex=1.2, font=2)
+  text(90, 70, round(as.numeric(cm$byClass[7]), 3), cex=1.2)
+
+  # add in the accuracy information 
+  text(30, 35, names(cm$overall[1]), cex=1.5, font=2)
+  text(30, 20, round(as.numeric(cm$overall[1]), 3), cex=1.4)
+  text(70, 35, names(cm$overall[2]), cex=1.5, font=2)
+  text(70, 20, round(as.numeric(cm$overall[2]), 3), cex=1.4)
+}
+
+
+draw_confusion_matrix5 <- function(cm) {
+
+  total <- sum(cm$table)
+  res <- as.numeric(cm$table)
+
+  # Generate color gradients. Palettes come from RColorBrewer.
+  greenPalette <- c("#F7FCF5","#E5F5E0","#C7E9C0","#A1D99B","#74C476","#41AB5D","#238B45","#006D2C","#00441B")
+  redPalette <- c("#FFF5F0","#FEE0D2","#FCBBA1","#FC9272","#FB6A4A","#EF3B2C","#CB181D","#A50F15","#67000D")
+  getColor <- function (greenOrRed = "green", amount = 0) {
+    if (amount == 0)
+      return("#FFFFFF")
+    palette <- greenPalette
+    if (greenOrRed == "red")
+      palette <- redPalette
+    colorRampPalette(palette)(100)[10 + ceiling(90 * amount / total)]
+  }
+
+  # set the basic layout
+  layout(matrix(c(1,1,2)))
+  par(mar=c(2,2,2,2))
+  plot(c(100, 345), c(300, 450), type = "n", xlab="", ylab="", xaxt='n', yaxt='n')
+  title('CONFUSION MATRIX for k = 5', cex.main=2)
+
+  # create the matrix 
+  classes = colnames(cm$table)
+  rect(150, 430, 240, 370, col=getColor("green", res[1]))
+  text(195, 435, classes[1], cex=1.2)
+  rect(250, 430, 340, 370, col=getColor("red", res[3]))
+  text(295, 435, classes[2], cex=1.2)
+  text(125, 370, 'Predicted', cex=1.3, srt=90, font=2)
+  text(245, 450, 'Actual', cex=1.3, font=2)
+  rect(150, 305, 240, 365, col=getColor("red", res[2]))
+  rect(250, 305, 340, 365, col=getColor("green", res[4]))
+  text(140, 400, classes[1], cex=1.2, srt=90)
+  text(140, 335, classes[2], cex=1.2, srt=90)
+
+  # add in the cm results
+  text(195, 400, res[1], cex=1.6, font=2, col='white')
+  text(195, 335, res[2], cex=1.6, font=2, col='white')
+  text(295, 400, res[3], cex=1.6, font=2, col='white')
+  text(295, 335, res[4], cex=1.6, font=2, col='white')
+
+  # add in the specifics 
+  plot(c(100, 0), c(100, 0), type = "n", xlab="", ylab="", main = "DETAILS", xaxt='n', yaxt='n')
+  text(10, 85, names(cm$byClass[1]), cex=1.2, font=2)
+  text(10, 70, round(as.numeric(cm$byClass[1]), 3), cex=1.2)
+  text(30, 85, names(cm$byClass[2]), cex=1.2, font=2)
+  text(30, 70, round(as.numeric(cm$byClass[2]), 3), cex=1.2)
+  text(50, 85, names(cm$byClass[5]), cex=1.2, font=2)
+  text(50, 70, round(as.numeric(cm$byClass[5]), 3), cex=1.2)
+  text(70, 85, names(cm$byClass[6]), cex=1.2, font=2)
+  text(70, 70, round(as.numeric(cm$byClass[6]), 3), cex=1.2)
+  text(90, 85, names(cm$byClass[7]), cex=1.2, font=2)
+  text(90, 70, round(as.numeric(cm$byClass[7]), 3), cex=1.2)
+
+  # add in the accuracy information 
+  text(30, 35, names(cm$overall[1]), cex=1.5, font=2)
+  text(30, 20, round(as.numeric(cm$overall[1]), 3), cex=1.4)
+  text(70, 35, names(cm$overall[2]), cex=1.5, font=2)
+  text(70, 20, round(as.numeric(cm$overall[2]), 3), cex=1.4)
+}
+
+
+draw_confusion_matrix13 <- function(cm) {
+
+  total <- sum(cm$table)
+  res <- as.numeric(cm$table)
+
+  # Generate color gradients. Palettes come from RColorBrewer.
+  greenPalette <- c("#F7FCF5","#E5F5E0","#C7E9C0","#A1D99B","#74C476","#41AB5D","#238B45","#006D2C","#00441B")
+  redPalette <- c("#FFF5F0","#FEE0D2","#FCBBA1","#FC9272","#FB6A4A","#EF3B2C","#CB181D","#A50F15","#67000D")
+  getColor <- function (greenOrRed = "green", amount = 0) {
+    if (amount == 0)
+      return("#FFFFFF")
+    palette <- greenPalette
+    if (greenOrRed == "red")
+      palette <- redPalette
+    colorRampPalette(palette)(100)[10 + ceiling(90 * amount / total)]
+  }
+
+  # set the basic layout
+  layout(matrix(c(1,1,2)))
+  par(mar=c(2,2,2,2))
+  plot(c(100, 345), c(300, 450), type = "n", xlab="", ylab="", xaxt='n', yaxt='n')
+  title('CONFUSION MATRIX for k = 13', cex.main=2)
+
+  # create the matrix 
+  classes = colnames(cm$table)
+  rect(150, 430, 240, 370, col=getColor("green", res[1]))
+  text(195, 435, classes[1], cex=1.2)
+  rect(250, 430, 340, 370, col=getColor("red", res[3]))
+  text(295, 435, classes[2], cex=1.2)
+  text(125, 370, 'Predicted', cex=1.3, srt=90, font=2)
+  text(245, 450, 'Actual', cex=1.3, font=2)
+  rect(150, 305, 240, 365, col=getColor("red", res[2]))
+  rect(250, 305, 340, 365, col=getColor("green", res[4]))
+  text(140, 400, classes[1], cex=1.2, srt=90)
+  text(140, 335, classes[2], cex=1.2, srt=90)
+
+  # add in the cm results
+  text(195, 400, res[1], cex=1.6, font=2, col='white')
+  text(195, 335, res[2], cex=1.6, font=2, col='white')
+  text(295, 400, res[3], cex=1.6, font=2, col='white')
+  text(295, 335, res[4], cex=1.6, font=2, col='white')
+
+  # add in the specifics 
+  plot(c(100, 0), c(100, 0), type = "n", xlab="", ylab="", main = "DETAILS", xaxt='n', yaxt='n')
+  text(10, 85, names(cm$byClass[1]), cex=1.2, font=2)
+  text(10, 70, round(as.numeric(cm$byClass[1]), 3), cex=1.2)
+  text(30, 85, names(cm$byClass[2]), cex=1.2, font=2)
+  text(30, 70, round(as.numeric(cm$byClass[2]), 3), cex=1.2)
+  text(50, 85, names(cm$byClass[5]), cex=1.2, font=2)
+  text(50, 70, round(as.numeric(cm$byClass[5]), 3), cex=1.2)
+  text(70, 85, names(cm$byClass[6]), cex=1.2, font=2)
+  text(70, 70, round(as.numeric(cm$byClass[6]), 3), cex=1.2)
+  text(90, 85, names(cm$byClass[7]), cex=1.2, font=2)
+  text(90, 70, round(as.numeric(cm$byClass[7]), 3), cex=1.2)
+
+  # add in the accuracy information 
+  text(30, 35, names(cm$overall[1]), cex=1.5, font=2)
+  text(30, 20, round(as.numeric(cm$overall[1]), 3), cex=1.4)
+  text(70, 35, names(cm$overall[2]), cex=1.5, font=2)
+  text(70, 20, round(as.numeric(cm$overall[2]), 3), cex=1.4)
+}
+
+
+draw_confusion_matrix29 <- function(cm) {
+
+  total <- sum(cm$table)
+  res <- as.numeric(cm$table)
+
+  # Generate color gradients. Palettes come from RColorBrewer.
+  greenPalette <- c("#F7FCF5","#E5F5E0","#C7E9C0","#A1D99B","#74C476","#41AB5D","#238B45","#006D2C","#00441B")
+  redPalette <- c("#FFF5F0","#FEE0D2","#FCBBA1","#FC9272","#FB6A4A","#EF3B2C","#CB181D","#A50F15","#67000D")
+  getColor <- function (greenOrRed = "green", amount = 0) {
+    if (amount == 0)
+      return("#FFFFFF")
+    palette <- greenPalette
+    if (greenOrRed == "red")
+      palette <- redPalette
+    colorRampPalette(palette)(100)[10 + ceiling(90 * amount / total)]
+  }
+
+  # set the basic layout
+  layout(matrix(c(1,1,2)))
+  par(mar=c(2,2,2,2))
+  plot(c(100, 345), c(300, 450), type = "n", xlab="", ylab="", xaxt='n', yaxt='n')
+  title('CONFUSION MATRIX for k = 29', cex.main=2)
+
+  # create the matrix 
+  classes = colnames(cm$table)
+  rect(150, 430, 240, 370, col=getColor("green", res[1]))
+  text(195, 435, classes[1], cex=1.2)
+  rect(250, 430, 340, 370, col=getColor("red", res[3]))
+  text(295, 435, classes[2], cex=1.2)
+  text(125, 370, 'Predicted', cex=1.3, srt=90, font=2)
+  text(245, 450, 'Actual', cex=1.3, font=2)
+  rect(150, 305, 240, 365, col=getColor("red", res[2]))
+  rect(250, 305, 340, 365, col=getColor("green", res[4]))
+  text(140, 400, classes[1], cex=1.2, srt=90)
+  text(140, 335, classes[2], cex=1.2, srt=90)
+
+  # add in the cm results
+  text(195, 400, res[1], cex=1.6, font=2, col='white')
+  text(195, 335, res[2], cex=1.6, font=2, col='white')
+  text(295, 400, res[3], cex=1.6, font=2, col='white')
+  text(295, 335, res[4], cex=1.6, font=2, col='white')
+
+  # add in the specifics 
+  plot(c(100, 0), c(100, 0), type = "n", xlab="", ylab="", main = "DETAILS", xaxt='n', yaxt='n')
+  text(10, 85, names(cm$byClass[1]), cex=1.2, font=2)
+  text(10, 70, round(as.numeric(cm$byClass[1]), 3), cex=1.2)
+  text(30, 85, names(cm$byClass[2]), cex=1.2, font=2)
+  text(30, 70, round(as.numeric(cm$byClass[2]), 3), cex=1.2)
+  text(50, 85, names(cm$byClass[5]), cex=1.2, font=2)
+  text(50, 70, round(as.numeric(cm$byClass[5]), 3), cex=1.2)
+  text(70, 85, names(cm$byClass[6]), cex=1.2, font=2)
+  text(70, 70, round(as.numeric(cm$byClass[6]), 3), cex=1.2)
+  text(90, 85, names(cm$byClass[7]), cex=1.2, font=2)
+  text(90, 70, round(as.numeric(cm$byClass[7]), 3), cex=1.2)
+
+  # add in the accuracy information 
+  text(30, 35, names(cm$overall[1]), cex=1.5, font=2)
+  text(30, 20, round(as.numeric(cm$overall[1]), 3), cex=1.4)
+  text(70, 35, names(cm$overall[2]), cex=1.5, font=2)
+  text(70, 20, round(as.numeric(cm$overall[2]), 3), cex=1.4)
+}
+
+
+
+#We check different k values
+output.k1 <- knn(x.train, x.test, y.train, k=1)
+table(output.k1, y.test)
+mean(output.k1 != y.test) #Misclassification rate
+mean(output.k1 == y.test) #Accuracy
+
+output.k5 <- knn(x.train, x.test, y.train, k=5)
+table(output.k5, y.test)
+mean(output.k5 != y.test) #Misclassification rate
+mean(output.k5 == y.test) #Accuracy
+
+output.k13 <- knn(x.train, x.test, y.train, k=13)
+table(output.k13, y.test)
+mean(output.k13 != y.test) #Misclassification rate
+mean(output.k13 == y.test) #Accuracy
+
+cm1 <- confusionMatrix(output.k1, y.test)
+cm5 <- confusionMatrix(output.k5, y.test)
+cm13 <- confusionMatrix(output.k13, y.test)
+
+
+draw_confusion_matrix1(cm1)
+draw_confusion_matrix5(cm5)
+draw_confusion_matrix13(cm13)
+draw_confusion_matrix29(cm29)
+
+```
+
+
+```{r}
+df.subset <- df[c(1,3,4,38,42,44,45,46,63,70,80,89)]
+dim(df.subset)
+
+
+df.subset$Bankrupt. <- as.factor(df.subset$Bankrupt.)
+
+
+g <- ggpairs(
+  data = df.subset,
+  lower = list(continuous = wrap("smooth", alpha = 0.3, color = "blue", size = 0.1)),
+  upper = list(continuous = wrap("cor", size = 2)),
+  aes(colour = df.subset$Bankrupt., alpha = 0.4),
+  )
+g <- g + theme(
+    axis.text = element_text(size = 2),
+    axis.title = element_text(size = 2),
+    legend.background = element_rect(fill = "white"),
+    panel.grid.major = element_line(colour = NA),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "grey95")
+  )
+print(g, bottomHeightProportion = 0.5, leftWidthProportion = .5)
+
+
+
+# lowerFn <- function(data, mapping, ...) {
+#   p <- ggplot(data = data, mapping = mapping) +
+#     geom_point(color = 'blue', alpha=0.3, size=4) +
+#     geom_smooth(color = 'black', method='lm', size=1,...)
+#   p
+# }
+# 
+# g <- ggpairs( 
+#   data = mtcars,
+#   lower = list(continuous =  wrap(lowerFn)),
+#   # upper = list(continuous = wrap("cor", size = 2)),
+#   # aes(colour = df.subset$Bankrupt., alpha = 0.4)
+# )
+# g <- g + theme(
+#   axis.text = element_text(size = 3),
+#   axis.title = element_text(size = 3),
+#   legend.background = element_rect(fill = "white"),
+#   panel.grid.major = element_line(colour = NA),
+#   panel.grid.minor = element_blank(),
+#   panel.background = element_rect(fill = "grey95")
+# )
+# print(g, bottomHeightProportion = 0.5, leftWidthProportion = .5)
+
+```
+```{r}
+require(reshape2)
+
+df.subset.m <- melt(df.subset, id.var = "Bankrupt.")
+df.subset.m
+
+
+p <- ggplot(data = df.subset.m, aes(x=variable, y=value)) + 
+             geom_boxplot(aes(fill=Bankrupt.)) +
+  theme(
+    axis.text = element_text(size = 30),
+    axis.title = element_text(size = 30),
+    # legend.background = element_rect(fill = "white"),
+    # panel.grid.major = element_line(colour = NA),
+    # panel.grid.minor = element_blank(),
+    # panel.background = element_rect(fill = "grey95")
+  )
+p + facet_wrap( ~ variable, scales="free")
+```
+
+## Looking at Boxplots
+```{r}
+require(reshape2)
+
+for
+
+df.subset1 <- df[c(1:9)]
+
+df.subset1.m <- melt(df.subset, id.var = "Bankrupt.")
+
+
+p <- ggplot(data = df.subset.m, aes(x=variable, y=value)) + 
+             geom_boxplot(aes(fill=Bankrupt.)) +
+  theme(
+    axis.text = element_text(size = 6),
+    axis.title = element_text(size = 6),
+    # legend.background = element_rect(fill = "white"),
+    # panel.grid.major = element_line(colour = NA),
+    # panel.grid.minor = element_blank(),
+    # panel.background = element_rect(fill = "grey95")
+  )
+p + facet_wrap( ~ variable, scales="free")
+```
+
+
